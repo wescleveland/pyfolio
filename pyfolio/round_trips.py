@@ -149,7 +149,8 @@ def _groupby_consecutive(txn, max_delta=pd.Timedelta('8h')):
 
 
 def extract_round_trips(transactions,
-                        portfolio_value=None):
+                        portfolio_value=None,
+                        group_transactions=True):
     """Group transactions into "round trips". First, transactions are
     grouped by day and directionality. Then, long and short
     transactions are matched to create round-trip round_trips for which
@@ -197,26 +198,24 @@ def extract_round_trips(transactions,
         rt_returns are the returns in regards to the invested capital
         into that partiulcar round-trip.
     """
-
-    transactions = _groupby_consecutive(transactions)
+    if group_transactions:
+        transactions = _groupby_consecutive(transactions)
     roundtrips = []
 
     for sym, trans_sym in transactions.groupby('symbol'):
         trans_sym = trans_sym.sort_index()
         price_stack = deque()
         dt_stack = deque()
-        trans_sym['signed_price'] = trans_sym.price * \
-            np.sign(trans_sym.amount)
-        trans_sym['abs_amount'] = trans_sym.amount.abs().astype(int)
+        trans_sym['signed_price'] = trans_sym.price * np.sign(trans_sym.amount)
+        trans_sym['abs_amount'] = trans_sym.amount.abs()
         for dt, t in trans_sym.iterrows():
             if t.price < 0:
                 warnings.warn('Negative price detected, ignoring for'
                               'round-trip.')
                 continue
 
-            indiv_prices = [t.signed_price] * t.abs_amount
-            if (len(price_stack) == 0) or \
-               (copysign(1, price_stack[-1]) == copysign(1, t.amount)):
+            indiv_prices = np.asarray([t.signed_price]) * t.abs_amount
+            if (len(price_stack) == 0) or (copysign(1, price_stack[-1]) == copysign(1, t.amount)):
                 price_stack.extend(indiv_prices)
                 dt_stack.extend([dt] * len(indiv_prices))
             else:
@@ -243,15 +242,14 @@ def extract_round_trips(transactions,
                         dt_stack.append(dt)
 
                 roundtrips.append({'pnl': pnl,
-                                   'open_dt': cur_open_dts[0],
-                                   'close_dt': dt,
-                                   'long': price < 0,
-                                   'rt_returns': pnl / invested,
-                                   'symbol': sym,
-                                   })
+                                'open_dt': cur_open_dts[0],
+                                'close_dt': dt,
+                                'long': price < 0,
+                                'rt_returns': pnl / invested,
+                                'symbol': sym,
+                                })
 
     roundtrips = pd.DataFrame(roundtrips)
-
     roundtrips['duration'] = roundtrips['close_dt'].sub(roundtrips['open_dt'])
 
     if portfolio_value is not None:
@@ -269,7 +267,6 @@ def extract_round_trips(transactions,
 
         roundtrips['returns'] = tmp.pnl / tmp.portfolio_value
         roundtrips = roundtrips.drop('date', axis='columns')
-
     return roundtrips
 
 
